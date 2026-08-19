@@ -1,0 +1,17 @@
+# Private source corpus and derived retrieval indices
+my_md_docs/
+chunked_docs/
+gold_set/
+
+# Per-question reports and local runtime artifacts
+*_report.json
+*_baseline.json
+*_reproduced.json
+*_diff.json
+*_gate.json
+*.log
+__pycache__/
+.venv/
+.tools/
+.DS_Store
+

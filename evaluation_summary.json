@@ -1,0 +1,33 @@
+{
+  "candidate_baseline": "baseline-97.5-candidate",
+  "profile": "baseline_95",
+  "metrics": {
+    "questions": 40,
+    "hits": 39,
+    "hit_rate_at_5": 97.5,
+    "hit_at_1": 85.0,
+    "hit_at_3": 92.5,
+    "mrr_at_10": 88.92,
+    "ndcg_at_10": 77.22,
+    "required_evidence_recall_at_8": 80.25,
+    "rrf_expected_recall_at_50": 93.17
+  },
+  "acl": {
+    "preflight_failures": 0,
+    "unauthorized_candidates": 0,
+    "unauthorized_final_results": 0
+  },
+  "by_type_hit_rate_at_5": {
+    "single_document": 100.0,
+    "entity_disambiguation": 100.0,
+    "exact_field_or_table": 75.0,
+    "table_reconciliation": 100.0,
+    "cross_document": 100.0
+  },
+  "data_provenance": {
+    "gold_set_sha256": "20ddb99a2d8a914d90e42ef4c2792989f186cac0aab83f17b806ee107bd0cf5d",
+    "chunk_corpus_sha256": "dd25ca665ca44640fabdb44a9f2fb739a785c85297e2576c3b1e4eb6d11e774c",
+    "dictionary_version": "engineering-normalization-v1"
+  },
+  "privacy": "Raw corpus, chunk index, golden questions and question-level reports are intentionally excluded from this public repository."
+}

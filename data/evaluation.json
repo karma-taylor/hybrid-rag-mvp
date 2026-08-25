@@ -1,0 +1,9 @@
+[
+  {"query":"代码合并前需要什么批准？","user_role":"engineering","expected_doc_ids":["ENG-001"],"protected":true},
+  {"query":"差旅费用多久内提交报销？","user_role":"finance","expected_doc_ids":["FIN-001"],"protected":true},
+  {"query":"保险事故发生后多久通知？","user_role":"insurance","expected_doc_ids":["INS-001"],"protected":true},
+  {"query":"采购付款要关联哪些材料？","user_role":"finance","expected_doc_ids":["FIN-002"]},
+  {"query":"远程设备离职前需要做什么？","user_role":"engineering","expected_doc_ids":["ENG-002"]},
+  {"query":"重大风险事件如何汇报？","user_role":"executive","expected_doc_ids":["INS-002"]},
+  {"query":"访客能查看差旅报销制度吗？","user_role":"guest","expected_doc_ids":[]}
+]

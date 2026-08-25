@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: enterprise-policy-rag-demo
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DEMO_READ_ONLY
+        value: "true"
+      - key: RAG_ENABLE_DENSE
+        value: "false"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "12"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://api.deepseek.com
+      - key: OPENAI_MODEL
+        value: deepseek-chat

@@ -1,4 +1,4 @@
-from hybrid_retrieval import BM25, Chunk, HybridRetriever, acl_preflight, build_evidence, decompose, diagnose, field_coverage, intent_router, min_max, normalize, ranking_metrics, tokens
+from hybrid_retrieval import BM25, Chunk, HybridRetriever, acl_preflight, allowed, build_evidence, decompose, diagnose, extract_identifiers, field_coverage, intent_router, min_max, normalize, ranking_metrics, tokens
 from tune_fusion import stratified_folds
 
 def corpus():
@@ -10,6 +10,20 @@ def corpus():
 def test_normalization_is_shared_by_bm25():
     assert "24芯" in tokens("24 芯 CABLE")
     assert BM25(corpus()).score("24芯 CABLE", {0})[0][0] == 0
+
+def test_controlled_bilingual_expansion_matches_english_policy_fields():
+    docs = [
+        Chunk("policy", "Limit of Liability and Period of Insurance", "insurance/policy.md", "insurance"),
+        Chunk("other", "员工差旅补贴标准", "finance/a.md", "finance/compensation"),
+    ]
+    assert BM25(docs).score("职业责任险责任限额和保险期限", {0, 1})[0][0] == 0
+
+def test_contract_identifier_is_found_adjacent_to_chinese_text():
+    assert extract_identifiers("井场SO-04的 OPGW 工程量") == ["so-04"]
+
+def test_identified_contract_fields_prioritize_field_coverage_without_a_reranker():
+    route = intent_router("井场SO-01最终计量的标题和合同号是什么？")
+    assert route["coverage_priority"] is True
 
 def test_acl_is_applied_before_candidates():
     result = HybridRetriever(corpus()).search("员工差旅补贴标准", {"role": "engineering"})
@@ -26,7 +40,7 @@ def test_context_budget_preserves_one_result_per_query():
     assert [x["chunk_id"] for x in evidence["evidence"]] == ["a", "b"]
 
 def test_composite_search_keeps_acl_and_one_evidence_per_subquery():
-    result = HybridRetriever(corpus()).search_composite("ITEM-24 CABLE，同时财务预算审批流程", {"role": "executive"})
+    result = HybridRetriever(corpus()).search_composite("ITEM-24 CABLE，同时财务预算审批流程", {"roles": ["engineering", "finance"]})
     assert len(result["subqueries"]) == 2
     assert len(result["evidence_package"]["evidence"]) == 2
 
@@ -34,6 +48,25 @@ def test_acl_path_is_an_exact_allowed_department():
     doc = Chunk("doc", "编号规则", "engineering/doc.md", "engineering/network")
     gold = [{"question_id": "sample", "user_department_role": "engineering", "expected_chunks": ["doc"]}]
     assert acl_preflight([doc], gold) == []
+
+def test_legacy_department_aliases_are_explicitly_allow_listed():
+    civil = Chunk("civil", "工程合同", "civil/halfaya/a.md", "civil/halfaya")
+    moc = Chunk("moc", "MOC 项目合同", "civil/哈法亚MOC哈法亚油田分部运营中心EPCC项目/a.md", "civil/哈法亚MOC哈法亚油田分部运营中心EPCC项目")
+    insurance = Chunk("insurance", "保险条款", "insurance/a.md", "insurance")
+    general = Chunk("general", "导师制通知", "something/a.md", "something")
+
+    assert allowed(civil, ["engineering"])
+    assert allowed(civil, ["civil/halfaya"])
+    assert allowed(moc, ["engineering"])
+    assert allowed(moc, ["civil/哈法亚MOC哈法亚油田分部运营中心EPCC项目"])
+    assert allowed(insurance, ["insurance"])
+    assert allowed(general, ["something"])
+    assert not allowed(insurance, ["engineering"])
+    assert not allowed(general, ["insurance"])
+    assert allowed(civil, ["executive"])
+    assert allowed(insurance, ["executive"])
+    assert allowed(general, ["executive"])
+    assert not allowed(civil, ["operations"])
 
 def test_cross_document_queries_use_deterministic_subqueries():
     parts = decompose("项目文件编号如何区分？同时说明差旅补贴适用范围。")

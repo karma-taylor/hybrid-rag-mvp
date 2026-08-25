@@ -1,0 +1,13 @@
+services:
+  rag-demo:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    environment:
+      DEMO_READ_ONLY: "true"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 3

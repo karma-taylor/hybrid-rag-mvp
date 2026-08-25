@@ -11,6 +11,7 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from security import contains_instruction_override
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_INPUT_ROOT = PROJECT_ROOT / "my_md_docs"
@@ -28,6 +29,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip a document when its matching JSON output already exists.",
     )
+    parser.add_argument(
+        "--quarantine-root",
+        type=Path,
+        help="Directory for metadata-only records of chunks blocked by prompt-injection screening.",
+    )
     return parser.parse_args()
 
 
@@ -40,13 +46,13 @@ def build_splitter() -> RecursiveCharacterTextSplitter:
 
 
 def make_chunk_id(source_path: Path, chunk_index: int) -> str:
-    value = f"{source_path.as_posix()}:{chunk_index}".encode("utf-8")
+    value = f"{source_path.as_posix()}:{chunk_index}".encode()
     return hashlib.sha256(value).hexdigest()[:16]
 
 
 def make_derived_id(source_path: Path, kind: str, index: int) -> str:
     """Stable IDs for table parent/row chunks; legacy paragraph IDs remain unchanged."""
-    return hashlib.sha256(f"{source_path.as_posix()}:{kind}:{index}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(f"{source_path.as_posix()}:{kind}:{index}".encode()).hexdigest()[:16]
 
 
 def markdown_tables(content: str) -> list[list[str]]:
@@ -95,6 +101,7 @@ def process_file(
     input_root: Path,
     output_root: Path,
     splitter: RecursiveCharacterTextSplitter,
+    quarantine_root: Path,
 ) -> int:
     relative_path = markdown_path.relative_to(input_root)
     output_path = (output_root / relative_path).with_suffix(".json")
@@ -105,7 +112,7 @@ def process_file(
     department = department_path if department_path != "." else "general_public"
     chunks = [text for text in splitter.split_text(content) if text.strip()]
     document_id = hashlib.sha256(relative_path.as_posix().encode("utf-8")).hexdigest()[:16]
-    paragraph_chunks = [
+    candidates = [
         {
             "chunk_id": make_chunk_id(relative_path, index),
             "chunk_index": index,
@@ -123,12 +130,32 @@ def process_file(
         item["document_id"] = document_id
         item["version"] = 1
 
+    all_candidates = candidates + derived_chunks
+    accepted_chunks = []
+    quarantined = []
+    for item in all_candidates:
+        if contains_instruction_override(item["content"]):
+            # Keep only metadata in the audit artifact so sensitive document text
+            # never migrates into a secondary, ungoverned store.
+            quarantined.append({
+                "chunk_id": item["chunk_id"],
+                "source_path": item["source_path"],
+                "reason": "prompt_injection_marker",
+            })
+        else:
+            accepted_chunks.append(item)
+    if quarantined:
+        quarantine_path = (quarantine_root / relative_path).with_suffix(".json")
+        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+        quarantine_path.write_text(json.dumps({"quarantined": quarantined}, ensure_ascii=False, indent=2), encoding="utf-8")
+
     payload = {
         "source_path": relative_path.as_posix(),
         "department": department,
         "document_id": document_id,
-        "chunk_count": len(paragraph_chunks) + len(derived_chunks),
-        "chunks": paragraph_chunks + derived_chunks,
+        "chunk_count": len(accepted_chunks),
+        "quarantined_chunk_count": len(quarantined),
+        "chunks": accepted_chunks,
     }
 
     temporary_path = output_path.with_suffix(".json.tmp")
@@ -136,13 +163,14 @@ def process_file(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     temporary_path.replace(output_path)
-    return len(paragraph_chunks) + len(derived_chunks)
+    return len(accepted_chunks)
 
 
 def main() -> None:
     args = parse_args()
     input_root = args.input_root.expanduser().resolve()
     output_root = args.output_root.expanduser().resolve()
+    quarantine_root = (args.quarantine_root or output_root.parent / "quarantine").expanduser().resolve()
 
     if not input_root.is_dir():
         raise SystemExit(f"Input directory does not exist: {input_root}")
@@ -161,7 +189,7 @@ def main() -> None:
             print(f"SKIP    {relative_path}")
             continue
 
-        chunk_count = process_file(markdown_path, input_root, output_root, splitter)
+        chunk_count = process_file(markdown_path, input_root, output_root, splitter, quarantine_root)
         processed_files += 1
         total_chunks += chunk_count
         print(f"SUCCESS {relative_path} ({chunk_count} chunks)")
@@ -172,6 +200,7 @@ def main() -> None:
     print(f"Files skipped: {skipped_files}")
     print(f"Chunks generated this run: {total_chunks}")
     print(f"Output root: {output_root}")
+    print(f"Quarantine root: {quarantine_root}")
 
 
 if __name__ == "__main__":

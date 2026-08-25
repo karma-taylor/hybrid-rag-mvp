@@ -1,0 +1,9 @@
+[
+  {"doc_id":"ENG-001","title":"研发交付与代码评审规范","department":"engineering","allowed_roles":["engineering","executive"],"text":"生产代码合并前必须至少获得一名非作者的批准。高风险变更需要在发布前完成回滚演练，并在变更单中记录演练结果。"},
+  {"doc_id":"ENG-002","title":"研发设备与远程办公制度","department":"engineering","allowed_roles":["engineering","executive"],"text":"工程部员工申请远程办公设备时，应在资产系统提交申请。设备领用后由使用人负责保管，离职前须完成资产归还。"},
+  {"doc_id":"FIN-001","title":"差旅与费用报销管理办法","department":"finance","allowed_roles":["finance","executive"],"text":"员工应在费用发生后九十日内提交报销申请。单笔超过五千元的差旅费用，需要部门负责人和财务复核后方可支付。"},
+  {"doc_id":"FIN-002","title":"采购付款审批制度","department":"finance","allowed_roles":["finance","executive"],"text":"采购付款必须关联有效合同、验收记录和发票。未经审批的紧急付款应在付款后两个工作日内补齐审批材料。"},
+  {"doc_id":"INS-001","title":"保险事故报告与理赔流程","department":"insurance","allowed_roles":["insurance","executive"],"text":"发生可能触发保险责任的事故后，业务负责人应在二十四小时内通知保险与风险团队。理赔材料包括事故说明、损失清单和现场证据。"},
+  {"doc_id":"INS-002","title":"风险事件分级管理规范","department":"insurance","allowed_roles":["insurance","executive"],"text":"重大风险事件由风险负责人牵头建立处置台账，并每周向管理层报告处置进度，直至风险关闭。"},
+  {"doc_id":"HR-001","title":"全员员工手册","department":"hr","allowed_roles":["engineering","finance","insurance","executive"],"text":"员工应遵守信息安全要求，不得将内部制度、客户资料或账号凭证上传至未经批准的第三方服务。"}
+]

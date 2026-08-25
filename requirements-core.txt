@@ -1,0 +1,5 @@
+# Optional local-model stack for hybrid_retrieval.py dense retrieval and reranking.
+-r requirements.txt
+torch==2.13.0
+sentence-transformers==5.7.0
+transformers==5.15.0

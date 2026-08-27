@@ -26,6 +26,7 @@ T = TypeVar("T")
 REFUSAL_ANSWER = "抱歉，基于当前的知识库检索结果，未找到与该问题相关的信息。"
 ERROR_AUTH_INVALID = "AUTH_INVALID"
 ERROR_AUTH_MISSING_ROLE = "AUTH_MISSING_ROLE"
+ERROR_UNKNOWN_ROLE = "UNKNOWN_ROLE"
 ERROR_RETRIEVAL_FAILED = "RETRIEVAL_FAILED"
 ERROR_RETRIEVAL_TIMEOUT = "RETRIEVAL_TIMEOUT"
 ERROR_NO_EVIDENCE = "NO_AUTHORIZED_EVIDENCE"
@@ -38,6 +39,8 @@ ERROR_INTERNAL = "INTERNAL_ERROR"
 ERROR_QUERY_POLICY_DENIED = "QUERY_POLICY_DENIED"
 ERROR_QUERY_INJECTION_BLOCKED = "QUERY_INJECTION_BLOCKED"
 ERROR_EVIDENCE_UNGROUNDED = "EVIDENCE_UNGROUNDED"
+
+ALLOWED_ACL_ROLES = frozenset({"guest", "engineering", "finance", "insurance", "executive"})
 
 
 class Evidence(BaseModel):
@@ -129,11 +132,15 @@ class JwtIdentityAdapter:
         self.algorithms = algorithms
         self.development_role = development_role
         self.jwk_timeout_seconds = jwk_timeout_seconds
-        self.jwk_client = jwt.PyJWKClient(jwk_url, cache_jwk_set=True, lifespan=300, timeout=jwk_timeout_seconds) if jwk_url else None
+        if not algorithms:
+            raise RuntimeError("RAG_JWT_ALGORITHMS must contain at least one allowed algorithm")
+        self.jwk_client = jwt.PyJWKClient(jwk_url, cache_jwk_set=True, cache_keys=True, lifespan=300, timeout=jwk_timeout_seconds) if jwk_url else None
         if environment != "development" and (not issuer or not audience or not (jwk_url or public_key)):
             raise RuntimeError("JWT issuer, audience and JWK URL or public key are required outside development")
         if environment != "development" and any(algorithm.startswith("HS") or algorithm == "none" for algorithm in algorithms):
             raise RuntimeError("production JWT algorithms must use asymmetric signed tokens")
+        if development_role not in ALLOWED_ACL_ROLES:
+            raise RuntimeError("RAG_DEVELOPMENT_ROLE must be a restricted, recognised ACL role")
 
     @classmethod
     def from_environment(cls) -> JwtIdentityAdapter:
@@ -174,7 +181,7 @@ class JwtIdentityAdapter:
             if not key:
                 raise AuthenticationFailure(ERROR_AUTH_INVALID)
             claims = jwt.decode(token, key, algorithms=list(self.algorithms), issuer=self.issuer, audience=self.audience, options={"require": ["exp", "sub"]})
-        except (jwt.PyJWTError, AuthenticationFailure):
+        except (jwt.PyJWTError, AuthenticationFailure, OSError, ValueError):
             raise AuthenticationFailure(ERROR_AUTH_INVALID) from None
         subject, roles = claims.get("sub"), claims.get("roles")
         if not isinstance(subject, str) or not subject.strip():
@@ -183,7 +190,10 @@ class JwtIdentityAdapter:
             raise AuthenticationFailure(ERROR_AUTH_MISSING_ROLE)
         if not roles:
             raise AuthenticationFailure(ERROR_AUTH_MISSING_ROLE)
-        return Identity(subject=subject, roles=tuple(dict.fromkeys(role.strip() for role in roles)))
+        mapped_roles = tuple(dict.fromkeys(role.strip() for role in roles))
+        if any(role not in ALLOWED_ACL_ROLES for role in mapped_roles):
+            raise AuthenticationFailure(ERROR_UNKNOWN_ROLE)
+        return Identity(subject=subject, roles=mapped_roles)
 
 
 SYSTEM_PROMPT_TEMPLATE = """你是一个专业、严谨的企业知识库问答助手。
@@ -274,14 +284,59 @@ class RagHarness:
         package = retrieval.get("evidence_package", {})
         return HarnessResult(REFUSAL_ANSWER, [], {"subqueries": retrieval.get("subqueries", []), "decomposition_mode": retrieval.get("decomposition_mode"), "estimated_tokens": package.get("estimated_tokens", 0), "truncated": bool(package.get("truncated", False))}, error_code)
 
-    async def answer(self, request_id: str, authorization: str | None, query: str, top_k: int) -> HarnessResult:
+    def _validate_identity(self, identity: Identity) -> None:
+        if not identity.subject.strip() or not identity.roles:
+            raise AuthenticationFailure(ERROR_AUTH_INVALID)
+        if any(role not in ALLOWED_ACL_ROLES for role in identity.roles):
+            raise AuthenticationFailure(ERROR_UNKNOWN_ROLE)
+
+    def _cap_evidence(self, evidences: list[Evidence], retrieval: dict[str, Any]) -> list[Evidence]:
+        """Apply an independent post-ACL context cap even when a retriever has its own quota."""
+        character_budget = max(512, self.token_budget * 4)
+        used, capped, truncated = 0, [], False
+        for evidence in evidences:
+            remaining = character_budget - used
+            if remaining <= 0:
+                truncated = True
+                break
+            text = evidence.text[:remaining]
+            if len(text) < len(evidence.text):
+                truncated = True
+            capped.append(evidence.model_copy(update={"text": text}))
+            used += len(text)
+        package = retrieval.setdefault("evidence_package", {})
+        package["estimated_tokens"] = max(1, (used + 3) // 4) if capped else 0
+        package["truncated"] = bool(package.get("truncated", False) or truncated)
+        package["evidence"] = [{"chunk_id": evidence.doc_id} for evidence in capped]
+        return capped
+
+    def _evidences_from_retrieval(self, retrieval: dict[str, Any]) -> list[Evidence]:
+        return [Evidence(doc_id=item.get("canonical_chunk_id") or item.get("chunk_id") or item["doc_id"], text=item.get("content") or item["text"], score=item.get("final_score", item.get("score")), metadata={"source_path": item.get("source_path"), "department": item.get("department"), "chunk_type": item.get("chunk_type"), "table_id": item.get("table_id"), "subquery_index": item.get("subquery_index"), **(item.get("metadata") or {})}) for item in retrieval.get("evidence_package", {}).get("evidence", [])]
+
+    def _search(self, query: str, roles: tuple[str, ...], top_k: int) -> dict[str, Any]:
+        """Support both the production composite retriever and the local demo HybridRetriever."""
+        if hasattr(self.retriever, "search_composite"):
+            return self.retriever.search_composite(query, {"roles": list(roles)}, top_k, self.token_budget)
+        if not hasattr(self.retriever, "search"):
+            raise RuntimeError("retriever does not expose a supported search interface")
+        seen, evidence = set(), []
+        for role in roles:
+            for item in self.retriever.search(query, role, top_k):
+                if item.doc_id in seen:
+                    continue
+                seen.add(item.doc_id)
+                evidence.append({"doc_id": item.doc_id, "text": item.text, "score": item.score, "metadata": item.metadata})
+        return {"subqueries": ["single_query"], "decomposition_mode": "not_required", "searches": [{"acl": {"allowed_candidates": len(evidence)}, "trace": {"mode": "local_hybrid"}}], "evidence_package": {"evidence": evidence, "estimated_tokens": 0, "truncated": False}}
+
+    async def answer(self, request_id: str, authorization: str | None, query: str, top_k: int, *, identity: Identity | None = None) -> HarnessResult:
         started, retrieval = time.perf_counter(), {}
         timings = {"auth": 0.0, "retrieval": 0.0, "generation": 0.0, "citation_validation": 0.0}
         profile = getattr(getattr(self.retriever, "profile", None), "name", None)
         identity: Identity | None = None
         try:
             stage = time.perf_counter()
-            identity = self.identity_adapter.authenticate(authorization)
+            identity = identity or self.identity_adapter.authenticate(authorization)
+            self._validate_identity(identity)
             timings["auth"] = (time.perf_counter() - stage) * 1000
             if contains_instruction_override(query):
                 raise SafetyRejection(ERROR_QUERY_INJECTION_BLOCKED)
@@ -291,9 +346,9 @@ class RagHarness:
                 raise CircuitOpen
             stage = time.perf_counter()
             remaining = min(self.retrieval_timeout_seconds, self.total_timeout_seconds - (time.perf_counter() - started))
-            retrieval = await self._limited(self.retrieval_slots, lambda: asyncio.to_thread(self.retriever.search_composite, query, {"roles": list(identity.roles)}, top_k, self.token_budget), remaining)
+            retrieval = await self._limited(self.retrieval_slots, lambda: asyncio.to_thread(self._search, query, identity.roles, top_k), remaining)
             timings["retrieval"] = (time.perf_counter() - stage) * 1000
-            evidences = [Evidence(doc_id=item.get("canonical_chunk_id") or item["chunk_id"], text=item["content"], score=item.get("final_score"), metadata={"source_path": item.get("source_path"), "department": item.get("department"), "chunk_type": item.get("chunk_type"), "table_id": item.get("table_id"), "subquery_index": item.get("subquery_index")}) for item in retrieval["evidence_package"]["evidence"]]
+            evidences = self._cap_evidence(self._evidences_from_retrieval(retrieval), retrieval)
             if not evidences:
                 raise LookupError
             if not evidence_supports_query_anchors(query, (evidence.text for evidence in evidences)):

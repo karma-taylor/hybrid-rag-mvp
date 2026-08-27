@@ -2,6 +2,18 @@
 
 可公开运行的企业知识库 RAG 作品。仓库只包含合成制度数据，不包含真实企业文档、客户信息、密钥、模型缓存或私有评测集。
 
+## 本地双端演示
+
+运行 `./start_demo.sh` 后访问 `http://127.0.0.1:8000`。用户端采用“注册申请 → 首次强制改密 → 管理员分配角色 → 按角色检索”的流程；普通用户不能在前端切换角色。
+
+- 初始管理员用户名：`admin`
+- 初始管理员密码：由本地 `.env` 的 `ADMIN_INITIAL_PASSWORD` 设置（新建 `.env` 默认是 `Admin@123456`）
+- 管理员首次登录同样必须改密，然后从“后台管理”审批用户并分配 `guest`、`engineering`、`finance`、`insurance` 或 `executive` 角色。
+
+本地账号、会话与审计记录存放在 `data/rag_demo.sqlite`，已被 Git 忽略。若要彻底重置面试演示账号，先停止服务，再删除这个单一文件并重新启动。
+
+问答接口统一经由 `RagHarness` 编排：网页端将已验证的本地 Session 映射为受信任身份；生产 `enterprise_api.py` 则验证 Bearer JWT。生产启动需要 `RAG_AUDIT_SALT`、issuer、audience、算法白名单以及 JWK URL 或 public key，缺少任一项会失败关闭。
+
 ## 演示能力
 
 - **网页问答**：FastAPI 页面提供员工问答、X-Ray 证据透视与只读治理页。

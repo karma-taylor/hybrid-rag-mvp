@@ -58,33 +58,29 @@ class ChatResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize dependencies once; leave process live on failed startup."""
-    try:
-        adapter = JwtIdentityAdapter.from_environment()
-        await adapter.prewarm()
-        app.state.harness = RagHarness(
-            retriever=create_retriever(RagSettings()),
-            llm_client=AsyncOpenAI(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                base_url=os.getenv("OPENAI_BASE_URL") or None,
-                timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
-            ),
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            audit_salt=os.getenv("RAG_AUDIT_SALT", ""),
-            identity_adapter=adapter,
-            token_budget=int(os.getenv("RAG_EVIDENCE_TOKEN_BUDGET", "8000")),
-            retrieval_timeout_seconds=float(os.getenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "10")),
-            generation_timeout_seconds=float(os.getenv("RAG_GENERATION_TIMEOUT_SECONDS", "20")),
-            total_timeout_seconds=float(os.getenv("RAG_TOTAL_TIMEOUT_SECONDS", "30")),
-            retrieval_concurrency=int(os.getenv("RAG_RETRIEVAL_CONCURRENCY", "4")),
-            generation_concurrency=int(os.getenv("RAG_GENERATION_CONCURRENCY", "4")),
-            circuit_failure_threshold=int(os.getenv("RAG_CIRCUIT_FAILURE_THRESHOLD", "3")),
-            circuit_cooldown_seconds=float(os.getenv("RAG_CIRCUIT_COOLDOWN_SECONDS", "30")),
-        )
-        logger.info("Enterprise RAG Harness initialized")
-    except Exception:
-        logger.exception("Enterprise RAG Harness initialization failed")
-        app.state.harness = None
+    """Initialize all security-critical dependencies once; invalid production config aborts startup."""
+    adapter = JwtIdentityAdapter.from_environment()
+    await adapter.prewarm()
+    app.state.harness = RagHarness(
+        retriever=create_retriever(RagSettings()),
+        llm_client=AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL") or None,
+            timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+        ),
+        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        audit_salt=os.getenv("RAG_AUDIT_SALT", ""),
+        identity_adapter=adapter,
+        token_budget=int(os.getenv("RAG_EVIDENCE_TOKEN_BUDGET", "8000")),
+        retrieval_timeout_seconds=float(os.getenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "10")),
+        generation_timeout_seconds=float(os.getenv("RAG_GENERATION_TIMEOUT_SECONDS", "20")),
+        total_timeout_seconds=float(os.getenv("RAG_TOTAL_TIMEOUT_SECONDS", "30")),
+        retrieval_concurrency=int(os.getenv("RAG_RETRIEVAL_CONCURRENCY", "4")),
+        generation_concurrency=int(os.getenv("RAG_GENERATION_CONCURRENCY", "4")),
+        circuit_failure_threshold=int(os.getenv("RAG_CIRCUIT_FAILURE_THRESHOLD", "3")),
+        circuit_cooldown_seconds=float(os.getenv("RAG_CIRCUIT_COOLDOWN_SECONDS", "30")),
+    )
+    logger.info("Enterprise RAG Harness initialized")
     yield
 
 

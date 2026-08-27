@@ -94,7 +94,8 @@ def test_harness_returns_cited_answer_and_redacted_trace(caplog) -> None:
     assert trace["request_id"] == "request-1"
     assert trace["user_id_hash"].startswith("sha256:")
     assert trace["error_code"] is None
-    assert trace["estimated_context_tokens"] == 10
+    # Trace reports the Harness-enforced post-ACL evidence package, not a retriever-provided estimate.
+    assert trace["estimated_context_tokens"] == 3
     assert "敏感查询不得记录" not in caplog.text
     assert "金额为 100 元" not in caplog.text
 

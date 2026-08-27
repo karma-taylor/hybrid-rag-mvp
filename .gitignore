@@ -18,5 +18,6 @@ __pycache__/
 .pytest_cache/
 quarantine/
 *.sqlite
+data/*.sqlite*
 data/private/
 data/raw/
